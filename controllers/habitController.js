@@ -83,9 +83,37 @@ const updateHabit = asyncHandler(async (req, res) => {
   // 5. Respond with the updated habit.
   res.status(200).json(updatedHabit);
 });
+
+const deleteHabit = asyncHandler(async (req, res) => {
+  // 1. Find the habit by its ID from the URL parameters.
+  const habit = await Habit.findById(req.params.id);
+
+  // 2. Check if the habit exists.
+  if (!habit) {
+    res.status(404); // Using 404 is more specific for "resource not found".
+    throw new Error('Habit not found');
+  }
+
+  // The user is attached to the request by our 'protect' middleware.
+
+  // 3. CRITICAL: Verify that the logged-in user is the owner of the habit.
+  if (habit.user.toString() !== req.user.id) {
+    res.status(401); // 401 Unauthorized
+    throw new Error('User not authorized to delete this habit');
+  }
+
+  // 4. If the habit exists and the user is authorized, perform the deletion.
+  // The .deleteOne() method is called on the Mongoose document itself.
+  await habit.deleteOne();
+
+  // 5. Respond with the ID of the deleted habit for confirmation.
+  res.status(200).json({ id: req.params.id, message: 'Habit removed' });
+});
+
 // Export the controller function so it can be used in our routes.
 module.exports = {
   createHabit,
   getHabits,
   updateHabit,
+  deleteHabit,
 };
