@@ -62,4 +62,5 @@ jobs:
           app-name: 'habit-tracker-api'
           slot-name: 'Production'
           package: .
+
           
