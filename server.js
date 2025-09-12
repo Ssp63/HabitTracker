@@ -19,7 +19,8 @@ const corsOptions = {
       'http://localhost:3000',  // Local frontend
       'http://127.0.0.1:5173',
       'http://127.0.0.1:3000',
-      'https://habit-tracker-frontend-blond.vercel.app',  // Production frontend
+      'https://habit-tracker-frontend-blond.vercel.app',  // Old production frontend
+      'https://habit-tracker-tan-zeta.vercel.app',  // New production frontend
     ];
     
     // Add production URLs when available
