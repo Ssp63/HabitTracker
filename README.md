@@ -424,7 +424,7 @@ This project is licensed under the ISC License.
 
 **Shreyash Pawar**
 - GitHub: [@Ssp63](https://github.com/Ssp63)
-- Email: ssp@gmail.com
+- Email: pshreyash666@gmail.com
 
 ---
 
