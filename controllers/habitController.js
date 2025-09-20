@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const asyncHandler = require('express-async-handler');
 const { startOfDay, isToday, isYesterday, subDays, isSameDay, differenceInCalendarDays, format } = require('date-fns');
 const Habit = require('../models/habitModel');
+const HabitCompletion = require('../models/habitCompletionModel');
 
 const getHabitById = asyncHandler(async (req, res) => {
   const habit = await Habit.findById(req.params.id);
@@ -112,10 +113,32 @@ const trackHabit = asyncHandler(async (req, res) => {
     (completion) => completion.date.getTime() === today.getTime()
   );
 
+  let isCompleting = false;
+
   if (completionIndex > -1) {
+    // Remove completion from habit
     habit.completions.splice(completionIndex, 1);
+    
+    // Also remove from completion history
+    await HabitCompletion.deleteOne({
+      user: req.user.id,
+      habitId: habit._id,
+      completionDate: today
+    });
   } else {
+    // Add completion to habit
     habit.completions.push({ date: today });
+    isCompleting = true;
+    
+    // Also add to completion history
+    await HabitCompletion.create({
+      user: req.user.id,
+      habitId: habit._id,
+      habitName: habit.name,
+      completionDate: today,
+      habitType: habit.type,
+      habitCreatedAt: habit.createdAt
+    });
   }
 
   const updatedHabit = await habit.save();
@@ -322,47 +345,34 @@ const getChartData = asyncHandler(async (req, res) => {
   // Calculate the first day of our chart's date range.
   const startDate = subDays(today, periodInDays - 1);
 
-  // --- PART 1: Database Aggregation ---
+  // --- NEW: Use HabitCompletion collection for persistent historical data ---
   const pipeline = [
-    // STAGE 1: Match habits belonging to the currently logged-in user.
-    // This is a critical first step for security and performance.
+    // STAGE 1: Match completions belonging to the currently logged-in user.
     {
       $match: {
         user: new mongoose.Types.ObjectId(req.user.id),
-      },
-    },
-    // STAGE 2: Deconstruct the 'completions' array to process each one.
-    {
-      $unwind: '$completions',
-    },
-    // STAGE 3: Filter the individual completions to be within our desired date range.
-    {
-      $match: {
-        'completions.date': {
-          $gte: startDate, // Greater than or equal to our start date (30 days ago).
+        completionDate: {
+          $gte: startDate, // Greater than or equal to our start date
         },
       },
     },
-    // STAGE 4: Group the completions by calendar day and count them.
+    // STAGE 2: Group the completions by calendar day and count them.
     {
       $group: {
         // We group by the date part of the completion's timestamp.
-        // `$dateToString` converts the full ISODate to a 'YYYY-MM-DD' string,
-        // effectively ignoring the time and grouping all completions from the
-        // same day together.
         _id: {
-          $dateToString: { format: '%Y-%m-%d', date: '$completions.date' },
+          $dateToString: { format: '%Y-%m-%d', date: '$completionDate' },
         },
         // For each document in a group (i.e., for each completion on a given day),
         // we add 1 to the 'count'.
         count: { $sum: 1 },
       },
     },
-    // STAGE 5: Sort the results by date in ascending chronological order.
+    // STAGE 3: Sort the results by date in ascending chronological order.
     {
       $sort: { _id: 1 },
     },
-    // STAGE 6: Reshape the output for easier use in our app.
+    // STAGE 4: Reshape the output for easier use in our app.
     {
       $project: {
         _id: 0, // Exclude the default _id field from the output.
@@ -372,8 +382,8 @@ const getChartData = asyncHandler(async (req, res) => {
     },
   ];
 
-  // Execute the pipeline on the Habit collection.
-  const dailyCompletions = await Habit.aggregate(pipeline);
+  // Execute the pipeline on the HabitCompletion collection instead of Habit collection.
+  const dailyCompletions = await HabitCompletion.aggregate(pipeline);
 
   // --- PART 2: Application-Layer Densification ---
   // The result from the DB is sparse. Now we fill in the gaps for days with zero completions.
@@ -384,7 +394,7 @@ const getChartData = asyncHandler(async (req, res) => {
   );
 
   const chartData = [];
-  // Loop for each of the last 30 days, from the start date to today.
+  // Loop for each of the last days, from the start date to today.
   for (let i = 0; i < periodInDays; i++) {
     const currentDate = subDays(today, periodInDays - 1 - i);
     // Format the current date of the loop into 'YYYY-MM-DD' to match our map keys.
@@ -409,6 +419,98 @@ const getChartData = asyncHandler(async (req, res) => {
 
 
 
+// Migration function to populate HabitCompletion collection with existing data
+const migrateExistingCompletions = asyncHandler(async (req, res) => {
+  try {
+    // Get all habits with completions
+    const habits = await Habit.find({ 'completions.0': { $exists: true } });
+    
+    const completionsToInsert = [];
+    
+    for (const habit of habits) {
+      for (const completion of habit.completions) {
+        // Check if this completion already exists in HabitCompletion
+        const existingCompletion = await HabitCompletion.findOne({
+          user: habit.user,
+          habitId: habit._id,
+          completionDate: completion.date
+        });
+        
+        if (!existingCompletion) {
+          completionsToInsert.push({
+            user: habit.user,
+            habitId: habit._id,
+            habitName: habit.name,
+            completionDate: completion.date,
+            habitType: habit.type,
+            habitCreatedAt: habit.createdAt
+          });
+        }
+      }
+    }
+    
+    if (completionsToInsert.length > 0) {
+      await HabitCompletion.insertMany(completionsToInsert);
+    }
+    
+    res.status(200).json({ 
+      message: 'Migration completed successfully', 
+      migratedCompletions: completionsToInsert.length 
+    });
+  } catch (error) {
+    res.status(500);
+    throw new Error(`Migration failed: ${error.message}`);
+  }
+});
+
+// Get overall user stats from completion history
+const getOverallUserStats = asyncHandler(async (req, res) => {
+  try {
+    // Get all completion history for the user
+    const completions = await HabitCompletion.find({ user: req.user.id })
+      .sort({ completionDate: 1 });
+    
+    if (completions.length === 0) {
+      return res.status(200).json({
+        totalCompletions: 0,
+        totalDaysActive: 0,
+        currentStreak: 0,
+        longestStreak: 0,
+        completionPercentage: 0,
+        uniqueHabitsCompleted: 0
+      });
+    }
+    
+    // Calculate stats from completion history
+    const completionDates = completions.map(c => c.completionDate);
+    const uniqueDates = [...new Set(completionDates.map(date => format(date, 'yyyy-MM-dd')))];
+    const uniqueHabits = [...new Set(completions.map(c => c.habitId.toString()))];
+    
+    // Calculate streaks based on unique completion days
+    const sortedUniqueDates = uniqueDates.sort().map(date => new Date(date));
+    const currentStreak = calculateCurrentStreak(sortedUniqueDates);
+    const longestStreak = calculateLongestStreak(sortedUniqueDates);
+    
+    // Calculate overall completion percentage based on total active days
+    const firstCompletionDate = new Date(Math.min(...completionDates));
+    const totalPossibleDays = differenceInCalendarDays(new Date(), firstCompletionDate) + 1;
+    const completionPercentage = Math.round((uniqueDates.length / totalPossibleDays) * 100);
+    
+    res.status(200).json({
+      totalCompletions: completions.length,
+      totalDaysActive: uniqueDates.length,
+      currentStreak,
+      longestStreak,
+      completionPercentage,
+      uniqueHabitsCompleted: uniqueHabits.length
+    });
+  } catch (error) {
+    res.status(500);
+    throw new Error(`Failed to get user stats: ${error.message}`);
+  }
+});
+
+
 // Export the controller function so it can be used in our routes.
 module.exports = {
   createHabit,
@@ -422,5 +524,6 @@ module.exports = {
   calculateLongestStreak,
   calculateCompletionPercentage,
   getChartData,
-
+  migrateExistingCompletions,
+  getOverallUserStats,
 };

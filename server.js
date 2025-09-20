@@ -15,10 +15,14 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
-      'http://localhost:5173',  // Vite dev server
-      'http://localhost:3000',  // Local frontend
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:3000',
+      'http://localhost:5173',  // Vite dev server default
+      'http://localhost:3000',  // Local frontend (alternative)
+      'http://localhost:3001',  // Local frontend (alternative)
+      'http://localhost:3002',  // Local frontend (alternative)
+      'http://127.0.0.1:5173',  // IPv4 Vite dev server default
+      'http://127.0.0.1:3000',  // IPv4 Local frontend (alternative)
+      'http://127.0.0.1:3001',  // IPv4 Local frontend (alternative)
+      'http://127.0.0.1:3002',  // IPv4 Local frontend (current)
       'https://habit-tracker-frontend-blond.vercel.app',  // Old production frontend
       'https://habit-tracker-tan-zeta.vercel.app',  // New production frontend
     ];
