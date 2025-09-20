@@ -25,6 +25,7 @@ const corsOptions = {
       'http://127.0.0.1:3002',  // IPv4 Local frontend (current)
       'https://habit-tracker-frontend-blond.vercel.app',  // Old production frontend
       'https://habit-tracker-tan-zeta.vercel.app',  // New production frontend
+      'https://habit-tracker-nu-nine.vercel.app',
     ];
     
     // Add production URLs when available
